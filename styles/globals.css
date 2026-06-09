@@ -1,0 +1,36 @@
+@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Lora:ital,wght@0,400;0,600;1,400&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    font-family: 'Lora', serif;
+    color: #1a1a1a;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply font-condensed font-bold text-sm tracking-widest uppercase px-6 py-3 bg-green-hub text-white rounded hover:bg-green-dark transition-colors cursor-pointer border-0;
+  }
+  .btn-secondary {
+    @apply font-condensed font-bold text-sm tracking-widest uppercase px-6 py-3 bg-transparent text-gray-800 border border-gray-300 rounded hover:bg-gray-50 transition-colors cursor-pointer;
+  }
+  .card {
+    @apply bg-white border border-gray-200 rounded-xl p-5;
+  }
+  .input {
+    @apply w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm font-serif focus:outline-none focus:border-green-hub transition-colors;
+  }
+  .label {
+    @apply font-condensed font-semibold text-xs tracking-widest uppercase text-gray-400 mb-1 block;
+  }
+  .section-title {
+    @apply font-condensed font-black text-3xl text-gray-900;
+  }
+  .tag {
+    @apply font-condensed font-semibold text-xs tracking-wider uppercase px-2.5 py-1 rounded;
+  }
+}
