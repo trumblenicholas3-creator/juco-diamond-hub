@@ -1,61 +1,37 @@
-import Stripe from 'stripe'
 import { createClient } from '@supabase/supabase-js'
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 )
 
-export const config = { api: { bodyParser: false } }
-
-async function getRawBody(req) {
-  return new Promise((resolve, reject) => {
-    const chunks = []
-    req.on('data', chunk => chunks.push(chunk))
-    req.on('end', () => resolve(Buffer.concat(chunks)))
-    req.on('error', reject)
-  })
-}
-
 export default async function handler(req, res) {
-  if (req.method !== 'POST') return res.status(405).end()
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
-  const rawBody = await getRawBody(req)
-  const sig = req.headers['stripe-signature']
+  const { user_id, admin_delete_id } = req.body
 
-  let event
   try {
-    event = stripe.webhooks.constructEvent(rawBody, sig, process.env.STRIPE_WEBHOOK_SECRET)
+    // Admin deleting another user
+    if (admin_delete_id) {
+      const authHeader = req.headers.authorization
+      if (!authHeader) return res.status(401).json({ error: 'Unauthorized' })
+      const token = authHeader.replace('Bearer ', '')
+      const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token)
+      if (authError || user.email !== process.env.NEXT_PUBLIC_ADMIN_EMAIL) {
+        return res.status(403).json({ error: 'Forbidden' })
+      }
+      await supabaseAdmin.auth.admin.deleteUser(admin_delete_id)
+      return res.status(200).json({ success: true })
+    }
+
+    // User deleting their own account
+    if (user_id) {
+      await supabaseAdmin.auth.admin.deleteUser(user_id)
+      return res.status(200).json({ success: true })
+    }
+
+    res.status(400).json({ error: 'Missing user_id' })
   } catch (err) {
-    return res.status(400).json({ error: `Webhook error: ${err.message}` })
+    res.status(500).json({ error: err.message })
   }
-
-  const session = event.data.object
-  const { user_id, price_id } = session.metadata || {}
-
-  if (event.type === 'checkout.session.completed') {
-    if (price_id === 'athlete_spotlight') {
-      const spotlight_until = new Date()
-      spotlight_until.setDate(spotlight_until.getDate() + 30)
-      await supabaseAdmin.from('athletes').update({
-        is_featured: true,
-        spotlight_until: spotlight_until.toISOString()
-      }).eq('user_id', user_id)
-    }
-
-    if (price_id === 'coach_monthly' || price_id === 'coach_yearly') {
-      await supabaseAdmin.from('coaches').update({
-        is_premium: true,
-        stripe_customer_id: session.customer,
-      }).eq('user_id', user_id)
-    }
-  }
-
-  if (event.type === 'customer.subscription.deleted') {
-    const customer_id = session.customer
-    await supabaseAdmin.from('coaches').update({ is_premium: false }).eq('stripe_customer_id', customer_id)
-  }
-
-  res.status(200).json({ received: true })
 }

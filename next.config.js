@@ -1,6 +1,4 @@
-/** @type {import('next').NextConfig} */
-const nextConfig = {
-  reactStrictMode: true,
-}
-
-module.exports = nextConfig
+NEXT_PUBLIC_SUPABASE_URL=https://wzrylhblmlxbasqvgmni.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind6cnlsaGJsbWx4YmFzcXZnbW5pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1OTc5MDgsImV4cCI6MjA5NjE3MzkwOH0.mBK1dt3NQbqg2JkGGKi86rB0hNACNFcRnnCPgfGinGM
+RESEND_API_KEY=re_ShTupcc2_MJqDvcCUUZ8jKoZ39fEYPM6F
+NEXT_PUBLIC_SITE_URL=https://juco-diamond-hub.vercel.app

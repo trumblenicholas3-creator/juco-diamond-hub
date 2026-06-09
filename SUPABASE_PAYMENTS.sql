@@ -1,28 +1,25 @@
 -- Run in Supabase SQL Editor
 
--- Add payment columns to athletes
-alter table athletes add column if not exists photo_url text;
-alter table athletes add column if not exists is_featured boolean default false;
-alter table athletes add column if not exists spotlight_until timestamp with time zone;
-alter table athletes add column if not exists stats_season text default '2024';
+-- Add new columns to coaches
+alter table coaches add column if not exists division text;
+alter table coaches add column if not exists location text;
+alter table coaches add column if not exists photo_url text;
 
--- Add payment columns to coaches
-alter table coaches add column if not exists is_premium boolean default false;
-alter table coaches add column if not exists stripe_customer_id text;
-
--- Athlete photos storage bucket
+-- Create storage bucket for coach photos
 insert into storage.buckets (id, name, public)
-values ('athlete-photos', 'athlete-photos', true)
+values ('coach-photos', 'coach-photos', true)
 on conflict do nothing;
 
-create policy "Athlete photos are publicly accessible"
+-- Allow anyone to view coach photos
+create policy "Coach photos are publicly accessible"
   on storage.objects for select
-  using ( bucket_id = 'athlete-photos' );
+  using ( bucket_id = 'coach-photos' );
 
-create policy "Athletes can upload their photo"
+-- Allow authenticated users to upload coach photos
+create policy "Coaches can upload their photo"
   on storage.objects for insert
-  with check ( bucket_id = 'athlete-photos' AND auth.role() = 'authenticated' );
+  with check ( bucket_id = 'coach-photos' AND auth.role() = 'authenticated' );
 
-create policy "Athletes can update their photo"
+create policy "Coaches can update their photo"
   on storage.objects for update
-  using ( bucket_id = 'athlete-photos' AND auth.role() = 'authenticated' );
+  using ( bucket_id = 'coach-photos' AND auth.role() = 'authenticated' );

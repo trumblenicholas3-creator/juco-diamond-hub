@@ -1,170 +1,157 @@
-import { useState, useEffect, useCallback } from 'react'
-import Link from 'next/link'
+import { useState } from 'react'
 import { useRouter } from 'next/router'
+import Link from 'next/link'
 import Navbar from '../../components/Navbar'
 import { supabase } from '../../lib/supabase'
 
-const POSITIONS = ['','Pitcher','Catcher','First Base','Second Base','Third Base','Shortstop','Left Field','Center Field','Right Field','Utility','Designated Player']
-const STATES = ['','AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY']
-const GRAD_YEARS = ['','2025','2026','2027','2028']
-const STATUS_OPTIONS = ['','Available','Committed']
+const DIVISIONS = ['NCAA Division I', 'NCAA Division II', 'NCAA Division III', 'NAIA', 'NJCAA', 'Other']
+const TITLES = ['Head Coach', 'Assistant Coach', 'Recruiting Coordinator', 'Volunteer Coach', 'Graduate Assistant', 'Other']
 
-const statusColors = {
-  'Available': 'bg-green-light text-green-darker',
-  'Committed': 'bg-blue-50 text-blue-800',
-  : 'bg-amber-50 text-amber-800',
-}
-
-export default function CoachDashboard() {
+export default function CoachSignup() {
   const router = useRouter()
-  const [user, setUser] = useState(null)
-  const [athletes, setAthletes] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [savedIds, setSavedIds] = useState(new Set())
-  const [filters, setFilters] = useState({
-    position: '', state: '', grad_year: '',
-    recruiting_status: '', min_gpa: '', search: ''
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [photoFile, setPhotoFile] = useState(null)
+  const [photoPreview, setPhotoPreview] = useState(null)
+  const [form, setForm] = useState({
+    email: '', password: '', first_name: '', last_name: '',
+    school: '', title: '', division: '', location: '', phone: '', reason: ''
   })
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      if (!data?.user) { router.push('/coach/login'); return }
-      setUser(data.user)
-      supabase.from('saved_prospects').select('athlete_id').eq('coach_id', data.user.id)
-        .then(({ data: saved }) => setSavedIds(new Set(saved?.map(s => s.athlete_id))))
-    })
-  }, [])
-
-  const fetchAthletes = useCallback(async () => {
-    setLoading(true)
-    let query = supabase.from('athletes').select('*').order('created_at', { ascending: false })
-    if (filters.position) query = query.eq('position', filters.position)
-    if (filters.state) query = query.eq('state', filters.state)
-    if (filters.grad_year) query = query.eq('grad_year', filters.grad_year)
-    if (filters.recruiting_status) query = query.eq('recruiting_status', filters.recruiting_status)
-    if (filters.min_gpa) query = query.gte('gpa', parseFloat(filters.min_gpa))
-    if (filters.search) query = query.or(`first_name.ilike.%${filters.search}%,last_name.ilike.%${filters.search}%,school.ilike.%${filters.search}%`)
-    const { data } = await query.limit(50)
-    setAthletes(data || [])
-    setLoading(false)
-  }, [filters])
-
-  useEffect(() => { fetchAthletes() }, [fetchAthletes])
-
-  const toggleSave = async (athleteId) => {
-    if (!user) return
-    if (savedIds.has(athleteId)) {
-      await supabase.from('saved_prospects').delete().eq('coach_id', user.id).eq('athlete_id', athleteId)
-      setSavedIds(s => { const n = new Set(s); n.delete(athleteId); return n })
-    } else {
-      await supabase.from('saved_prospects').upsert({ coach_id: user.id, athlete_id: athleteId })
-      setSavedIds(s => new Set(s).add(athleteId))
-    }
+  const handlePhoto = (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+    setPhotoFile(file)
+    setPhotoPreview(URL.createObjectURL(file))
   }
 
-  const setFilter = (k, v) => setFilters(f => ({ ...f, [k]: v }))
+  const handleSubmit = async () => {
+    if (!form.first_name || !form.last_name || !form.email || !form.password || !form.school || !form.title) {
+      setError('Please fill in all required fields.'); return
+    }
+    setLoading(true); setError('')
+
+    const { data, error: authError } = await supabase.auth.signUp({
+      email: form.email, password: form.password,
+      options: { data: { user_type: 'coach' } }
+    })
+    if (authError) { setError(authError.message); setLoading(false); return }
+
+    let photo_url = null
+    if (photoFile) {
+      const ext = photoFile.name.split('.').pop()
+      const fileName = `coach-${data.user.id}.${ext}`
+      const { error: uploadError } = await supabase.storage.from('coach-photos').upload(fileName, photoFile, { upsert: true })
+      if (!uploadError) {
+        const { data: urlData } = supabase.storage.from('coach-photos').getPublicUrl(fileName)
+        photo_url = urlData.publicUrl
+      }
+    }
+
+    const { error: profileError } = await supabase.from('coaches').insert({
+      user_id: data.user.id,
+      first_name: form.first_name,
+      last_name: form.last_name,
+      email: form.email,
+      school: form.school,
+      title: form.title,
+      division: form.division,
+      location: form.location,
+      phone: form.phone,
+      reason: form.reason,
+      photo_url,
+      verified: false,
+    })
+    if (profileError) { setError(profileError.message); setLoading(false); return }
+
+    // Notify admin by email
+    await fetch('/api/notify-coach-application', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        first_name: form.first_name, last_name: form.last_name,
+        email: form.email, school: form.school, title: form.title,
+        division: form.division, location: form.location,
+        phone: form.phone, reason: form.reason,
+      })
+    })
+
+    router.push('/coach/pending')
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Navbar user={user} userType="coach" />
+      <Navbar />
+      <div className="max-w-lg mx-auto px-4 py-12">
+        <div className="text-center mb-8">
+          <div className="font-condensed font-black text-3xl text-gray-900 mb-1">Coach application</div>
+          <p className="text-sm text-gray-500">Reviewed and approved within 24–48 hours.</p>
+        </div>
 
-      <div className="max-w-6xl mx-auto px-6 py-8">
-        <div className="flex items-center justify-between mb-6">
+        <div className="card space-y-4">
+          {error && <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-600">{error}</div>}
+
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-700">
+            📋 Your application will be reviewed before access is granted.
+          </div>
+
+          {/* Photo upload */}
           <div>
-            <h1 className="font-condensed font-black text-3xl text-gray-900">Recruit search</h1>
-            <p className="text-sm text-gray-500 mt-0.5">{athletes.length} athletes found</p>
-          </div>
-          <Link href="/coach/saved" className="btn-secondary text-xs px-4 py-2 flex items-center gap-2">
-            🔖 Saved prospects ({savedIds.size})
-          </Link>
-        </div>
-
-        <div className="card mb-6">
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-            <div className="lg:col-span-2">
-              <label className="label">Search name / school</label>
-              <input className="input" value={filters.search} onChange={e => setFilter('search', e.target.value)} placeholder="Jordan, St. Philip's..." />
-            </div>
-            <div>
-              <label className="label">Position</label>
-              <select className="input" value={filters.position} onChange={e => setFilter('position', e.target.value)}>
-                {POSITIONS.map(p => <option key={p} value={p}>{p || 'All positions'}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="label">State</label>
-              <select className="input" value={filters.state} onChange={e => setFilter('state', e.target.value)}>
-                {STATES.map(s => <option key={s} value={s}>{s || 'All states'}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="label">Grad year</label>
-              <select className="input" value={filters.grad_year} onChange={e => setFilter('grad_year', e.target.value)}>
-                {GRAD_YEARS.map(y => <option key={y} value={y}>{y || 'All years'}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="label">Status</label>
-              <select className="input" value={filters.recruiting_status} onChange={e => setFilter('recruiting_status', e.target.value)}>
-                {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s || 'Any status'}</option>)}
-              </select>
-            </div>
-          </div>
-          <div className="flex items-center gap-3 mt-3">
-            <div className="w-32">
-              <label className="label">Min GPA</label>
-              <input className="input" type="number" step="0.1" min="0" max="4.0" value={filters.min_gpa} onChange={e => setFilter('min_gpa', e.target.value)} placeholder="2.5" />
-            </div>
-            <button onClick={() => setFilters({ position:'',state:'',grad_year:'',recruiting_status:'',min_gpa:'',search:'' })}
-              className="btn-secondary text-xs px-3 py-2 mt-4">Clear filters</button>
-          </div>
-        </div>
-
-        {loading ? (
-          <div className="text-center py-16 text-gray-400 font-condensed font-semibold text-sm tracking-widest uppercase">Searching...</div>
-        ) : athletes.length === 0 ? (
-          <div className="text-center py-16 card">
-            <div className="text-4xl mb-3">🔍</div>
-            <div className="font-condensed font-bold text-lg text-gray-600 mb-1">No athletes found</div>
-            <p className="text-sm text-gray-400">Try adjusting your filters</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {athletes.map(a => (
-              <div key={a.id} className="card hover:border-green-hub transition-colors group">
-                <div className="flex items-start gap-3 mb-4">
-                  <div className="w-12 h-12 rounded-full bg-green-light border border-green-mid flex items-center justify-center font-condensed font-black text-lg text-green-darker flex-shrink-0">
-                    {a.first_name?.[0]}{a.last_name?.[0]}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="font-condensed font-black text-lg text-gray-900 leading-tight">{a.first_name} {a.last_name}</div>
-                    <div className="text-xs text-gray-400 truncate">{a.school}</div>
-                    <div className="text-xs text-gray-400">{a.city && a.state ? `${a.city}, ${a.state}` : a.state}</div>
-                  </div>
-                  <button onClick={() => toggleSave(a.id)} className="text-lg flex-shrink-0 opacity-50 hover:opacity-100 transition-opacity" title="Save prospect">
-                    {savedIds.has(a.id) ? '🔖' : '🏷️'}
-                  </button>
-                </div>
-
-                <div className="flex gap-1.5 flex-wrap mb-3">
-                  {a.position && <span className="tag bg-green-light text-green-darker text-xs">{a.position}</span>}
-                  {a.conference && <span className="tag bg-blue-50 text-blue-800 text-xs">{a.conference}</span>}
-                  {a.recruiting_status && <span className={`tag text-xs ${statusColors[a.recruiting_status] || 'bg-gray-100 text-gray-600'}`}>{a.recruiting_status}</span>}
-                </div>
-
-                <div className="grid grid-cols-3 gap-2 mb-4">
-                  {a.gpa && <div className="bg-gray-50 rounded-lg p-2 text-center"><div className="font-condensed font-black text-lg text-gray-900">{a.gpa}</div><div className="font-condensed text-xs uppercase tracking-wider text-gray-400">GPA</div></div>}
-                  {a.grad_year && <div className="bg-gray-50 rounded-lg p-2 text-center"><div className="font-condensed font-black text-lg text-gray-900">{a.grad_year}</div><div className="font-condensed text-xs uppercase tracking-wider text-gray-400">Grad</div></div>}
-                  {(a.hudl_url || a.youtube_url) && <div className="bg-gray-50 rounded-lg p-2 text-center"><div className="font-condensed font-black text-lg text-gray-900">▶</div><div className="font-condensed text-xs uppercase tracking-wider text-gray-400">Film</div></div>}
-                </div>
-
-                <Link href={`/athlete/${a.id}`} className="block w-full text-center btn-secondary text-xs py-2">
-                  View full profile →
-                </Link>
+            <label className="label">Profile photo (optional)</label>
+            <div className="flex items-center gap-4">
+              <div className="w-16 h-16 rounded-full bg-blue-50 border-2 border-blue-100 flex items-center justify-center overflow-hidden flex-shrink-0">
+                {photoPreview
+                  ? <img src={photoPreview} alt="Preview" className="w-full h-full object-cover" />
+                  : <span className="text-2xl">👤</span>
+                }
               </div>
-            ))}
+              <label className="btn-secondary text-xs px-4 py-2 cursor-pointer">
+                Choose photo
+                <input type="file" accept="image/*" className="hidden" onChange={handlePhoto} />
+              </label>
+            </div>
           </div>
-        )}
+
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className="label">First name *</label><input className="input" value={form.first_name} onChange={e => set('first_name', e.target.value)} placeholder="Sarah" /></div>
+            <div><label className="label">Last name *</label><input className="input" value={form.last_name} onChange={e => set('last_name', e.target.value)} placeholder="Mitchell" /></div>
+          </div>
+          <div><label className="label">Email *</label><input className="input" type="email" value={form.email} onChange={e => set('email', e.target.value)} placeholder="coach@university.edu" /></div>
+          <div><label className="label">Password *</label><input className="input" type="password" value={form.password} onChange={e => set('password', e.target.value)} placeholder="Min. 8 characters" /></div>
+          <div><label className="label">School / University *</label><input className="input" value={form.school} onChange={e => set('school', e.target.value)} placeholder="University of Texas" /></div>
+          <div>
+            <label className="label">Title / Role *</label>
+            <select className="input" value={TITLES.includes(form.title) ? form.title : form.title ? 'Other' : ''} onChange={e => set('title', e.target.value)}>
+              <option value="">Select title...</option>
+              {TITLES.map(t => <option key={t}>{t}</option>)}
+            </select>
+            {form.title === 'Other' && (
+              <input className="input mt-2" value={form.custom_title || ''} onChange={e => set('custom_title', e.target.value)} placeholder="Enter your title..." />
+            )}
+          </div>
+          <div>
+            <label className="label">Division</label>
+            <select className="input" value={form.division} onChange={e => set('division', e.target.value)}>
+              <option value="">Select division...</option>
+              {DIVISIONS.map(d => <option key={d}>{d}</option>)}
+            </select>
+          </div>
+          <div><label className="label">City, State</label><input className="input" value={form.location} onChange={e => set('location', e.target.value)} placeholder="Austin, TX" /></div>
+          <div><label className="label">Phone (optional)</label><input className="input" value={form.phone} onChange={e => set('phone', e.target.value)} placeholder="(555) 000-0000" /></div>
+          <div>
+            <label className="label">Tell us about your program (optional)</label>
+            <textarea className="input h-20 resize-none" value={form.reason} onChange={e => set('reason', e.target.value)} placeholder="What are you looking for in recruits?" />
+          </div>
+
+          <button className="btn-primary w-full" onClick={handleSubmit} disabled={loading}>
+            {loading ? 'Submitting...' : 'Submit application →'}
+          </button>
+        </div>
+
+        <p className="text-center text-sm text-gray-500 mt-4">
+          Already approved? <Link href="/signin" className="text-green-hub underline">Sign in →</Link>
+        </p>
       </div>
     </div>
   )
